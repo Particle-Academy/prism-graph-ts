@@ -22,7 +22,7 @@ export class Scope {
 
   constructor(tenant: string, owner: string | null = null, agent: string | null = null, thread: string | null = null) {
     for (const [level, value] of [['tenant', tenant], ['owner', owner], ['agent', agent], ['thread', thread]] as const) {
-      if (value !== null && !ID.test(value)) {
+      if (value !== null && (typeof value !== 'string' || !ID.test(value))) {
         throw new InvalidArgumentError(`Scope ${level} must be 1-191 of A-Z a-z 0-9 _ . : @ / -`);
       }
     }

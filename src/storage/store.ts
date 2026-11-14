@@ -119,7 +119,7 @@ export class GraphStore {
     }
     const [visible, bindings] = this.visible('s', reader);
     const fts = this.tables.fts();
-    const bounded = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(1000, Math.trunc(limit))) : 1;
     const rows = await this.db.all(
       `SELECT c.id AS chunk_id, -bm25(${fts}) AS score
        FROM ${fts} JOIN ${this.tables.chunks} c ON c.seq = ${fts}.rowid
