@@ -76,15 +76,26 @@ resolves to a JSON string and never rejects at the model. They can be
 registered on any MCP server, with no MCP SDK dependency. The scope and the
 writer are bound by your code, never by the model.
 
+With [`@particle-academy/prism-mcp-server`](https://github.com/Particle-Academy/prism-mcp-server-ts)
+(this is the setup the test suite runs over a real MCP exchange):
+
 ```ts
+import { LoopbackHttpTransport, Server, ToolDefinition, type JsonObject } from '@particle-academy/prism-mcp-server';
 import { memoryTools } from '@particle-academy/prism-graph';
 
+const server = new Server({ server: 'journal', transport: new LoopbackHttpTransport() });
 for (const tool of memoryTools(memory, 'agent:journal')) {
-  // e.g. official SDK low-level Server, prism-mcp-server, or your own dispatcher
-  register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema },
-           async (args) => ({ content: [{ type: 'text', text: await tool.call(args) }] }));
+  server.register(
+    new ToolDefinition(tool.name, tool.description, tool.inputSchema as JsonObject),
+    async (args) => ({ text: await tool.call(args), isError: false }),
+  );
 }
+await server.listen();
 ```
+
+`inputSchema` is plain JSON Schema, so any MCP server that takes a tool's
+JSON Schema as-is can register these tools without converting anything. No
+schema library is needed: `call()` validates its own input either way.
 
 The tools are `memory_search`, `memory_get`, `memory_facts`, `memory_timeline`
 and `memory_note`:
