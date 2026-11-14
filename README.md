@@ -54,6 +54,11 @@ await memory.ingest('entry-42', 'journal://42', text, new MarkdownChunker(), new
 const hits = await memory.search('refund policy');      // verbatim chunks, with trust and source
 ```
 
+`baseSchema()` is the complete schema for the default setup, and already
+includes the full-text table and its triggers. Do not run `fullTextSchema()`
+as well. Run `vectorSchema()` only if you store vectors. If a migration rebuilds
+the chunks table (which drops its triggers), run `repairFullTextSchema()`.
+
 ### Give memory a connection of its own
 
 SQLite transactions belong to the connection. Suppose another part of your
