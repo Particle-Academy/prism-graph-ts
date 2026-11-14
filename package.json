@@ -1,0 +1,35 @@
+{
+  "name": "@particle-academy/prism-graph",
+  "version": "0.1.0",
+  "description": "Long-term memory for AI agents, for TypeScript: scoped, trust-labelled, cited facts, hybrid search and erasure. The port of particle-academy/prism-graph.",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Particle-Academy/prism-graph-ts.git"
+  },
+  "license": "MIT"
+}

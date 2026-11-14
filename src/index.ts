@@ -1,0 +1,17 @@
+export { type Chunk, type Chunker, chunkId } from './chunk.js';
+export { MarkdownChunker } from './chunking/markdown.js';
+export { WindowChunker } from './chunking/window.js';
+export { digest, sha256 } from './digest.js';
+export { GraphError, InvalidArgumentError } from './errors.js';
+export type { EraseReport, Fact, IngestReport } from './fact.js';
+export { Graph, ScopedGraph, type Hit } from './graph.js';
+export { IndexSpec } from './index-spec.js';
+export { Scope } from './scope.js';
+export { NodeSqliteDriver, type Row, type SqlDriver, type SqlValue } from './storage/driver.js';
+export { baseSchema, fullTextSchema, repairFullTextSchema, TableMap, vectorSchema } from './storage/schema.js';
+export { ftsMatch, GraphStore, normaliseTime } from './storage/store.js';
+export { MAX_IDS, MAX_NOTE_BYTES, MAX_RESULTS, memoryTools, type MemoryToolDefinition } from './tools.js';
+export { type AcceptancePolicy, DefaultAcceptancePolicy, FactStatus, isTrust, Origin, Trust } from './trust.js';
+export { float32, MAX_K, SqliteVectorStore, type Embedder, type VectorStore } from './vectors.js';
+export { markVisible, scrubUtf8 } from './visible.js';
+export { FactsLayer, SearchLayer, Wake, WakeReport, type WakeIncluded, type WakeItem, type WakeLayer } from './wake.js';
