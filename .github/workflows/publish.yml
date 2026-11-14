@@ -260,7 +260,42 @@ jobs:
       #
       # `--access public` on EVERY publish, not just the first: scoped packages
       # default to restricted.
+      # A brand-new package's FIRST version is published by hand, because a
+      # Trusted Publisher cannot be attached to a name that does not exist yet.
+      # Its tag then reaches this job with the version already on npm, and npm
+      # refuses a republish. So the publish is skipped only when the version npm
+      # serves was built from this commit or an ancestor of it, AND nothing that
+      # goes into the package changed in between. The tag may sit on a later
+      # commit that only touched CI. A byte comparison of the tarballs is not
+      # usable: a hand publish from Windows carries CRLF line endings that this
+      # Linux checkout does not. Anything else stops the release: a published
+      # version this tag does not describe.
+      - name: Is this version already published?
+        id: existing
+        run: |
+          pkg="$(node -p "require('./package.json').name")"
+          want="${GITHUB_REF_NAME#v}"
+          head="$(npm view "${pkg}@${want}" gitHead --prefer-online 2>/dev/null || true)"
+          if [ -z "${head}" ]; then
+            echo "${pkg}@${want} is not on npm yet; publishing."
+            echo "published=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor "${head}" "${GITHUB_SHA}" 2>/dev/null; then
+            echo "::error::${pkg}@${want} is already on npm, built from ${head}, which is not this commit or an ancestor of it. This tag does not describe the published version."
+            exit 1
+          fi
+          inputs="src package.json package-lock.json tsconfig.json README.md LICENSE"
+          if ! git diff --quiet "${head}" "${GITHUB_SHA}" -- ${inputs}; then
+            echo "::error::${pkg}@${want} is already on npm, built from ${head}, but the package inputs changed since then:"
+            git diff --stat "${head}" "${GITHUB_SHA}" -- ${inputs}
+            exit 1
+          fi
+          echo "::notice::${pkg}@${want} is already on npm, built from ${head}, and no package input changed since; skipping the publish."
+          echo "published=true" >> "${GITHUB_OUTPUT}"
+
       - name: Publish
+        if: steps.existing.outputs.published != 'true'
         run: npx -y npm@11.18.0 publish --provenance --access public
 
   release:
