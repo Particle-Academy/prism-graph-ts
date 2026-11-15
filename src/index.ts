@@ -10,6 +10,7 @@ export { Scope } from './scope.js';
 export { NodeSqliteDriver, type Row, type SqlDriver, type SqlValue } from './storage/driver.js';
 export { baseSchema, fullTextSchema, repairFullTextSchema, TableMap, vectorSchema } from './storage/schema.js';
 export { ftsMatch, GraphStore, normaliseTime } from './storage/store.js';
+export type { ListedChunk, ListedSource, ListingPage } from './storage/store.js';
 export { MAX_IDS, MAX_NOTE_BYTES, MAX_RESULTS, memoryTools, type MemoryToolDefinition } from './tools.js';
 export { type AcceptancePolicy, DefaultAcceptancePolicy, FactStatus, isTrust, Origin, Trust } from './trust.js';
 export { float32, MAX_K, SqliteVectorStore, type Embedder, type VectorStore } from './vectors.js';

@@ -68,6 +68,27 @@ with it if prism-graph's write fails. So use a dedicated connection to the same
 file (WAL mode is the usual setup), or send every write on the shared
 connection through `driver.atomic()`.
 
+## Listing sources and chunks
+
+For a memory explorer, list what a scope can see, a page at a time:
+
+```ts
+const page = await memory.listSources();                // newest first, 50 per page
+const next = await memory.listSources(page.nextCursor);
+const chunks = await memory.listChunks(sourceId, null, 100);
+```
+
+Each call returns `{ contractVersion: 'g282.1', items, nextCursor }`, the same shape as the PHP package.
+- A source item has `sourceId`, `title` (`metadata.title`, else the uri), `kind` (`metadata.kind`, else null),
+  `createdAt`, `chunkCount` and `trust`.
+- A chunk item has `chunkId`, `sourceId`, `text`, `position` (its place in the source) and `provenance` (uri,
+  sha256, byte and line range, heading path, recipe, trust, writer, recordedAt).
+- **Scoped like every read.** A source outside the scope lists as empty.
+- **Cursors are opaque** and only work in the scope and listing that issued them.
+- **Page size** defaults to 50 and is capped at 200. Pass a different cap as `new Graph(store, vectors, embedder,
+  policy, listMax)`.
+- Retired sources and chunks are not listed.
+
 ## MCP tools on your own server
 
 `memoryTools()` returns framework-neutral tool definitions: a name, a
