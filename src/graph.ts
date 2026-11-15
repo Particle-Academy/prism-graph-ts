@@ -1,10 +1,10 @@
 import type { Chunk, Chunker } from './chunk.js';
-import { sha256 } from './digest.js';
+import { digest, sha256 } from './digest.js';
 import { GraphError, InvalidArgumentError } from './errors.js';
 import type { EraseReport, Fact, IngestReport } from './fact.js';
 import { IndexSpec } from './index-spec.js';
 import type { Scope } from './scope.js';
-import type { GraphStore } from './storage/store.js';
+import type { GraphStore, ListedChunk, ListedSource, ListingPage } from './storage/store.js';
 import { DefaultAcceptancePolicy, type AcceptancePolicy, type Origin } from './trust.js';
 import type { Embedder, VectorStore } from './vectors.js';
 
@@ -27,14 +27,19 @@ export class Graph {
     private readonly vectors: VectorStore | null = null,
     private readonly embedder: Embedder | null = null,
     private readonly policy: AcceptancePolicy = new DefaultAcceptancePolicy(),
+    /** The largest page listSources/listChunks will return (G-282). */
+    private readonly listMax: number = ScopedGraph.DEFAULT_LIST_MAX,
   ) {
+    if (!Number.isInteger(listMax) || listMax < 1) {
+      throw new InvalidArgumentError('listMax must be a positive integer.');
+    }
     if ((vectors === null) !== (embedder === null)) {
       throw new InvalidArgumentError('Configure a VectorStore and an Embedder together, or neither.');
     }
   }
 
   scope(scope: Scope): ScopedGraph {
-    return new ScopedGraph(scope, this.store, this.vectors, this.embedder, this.policy);
+    return new ScopedGraph(scope, this.store, this.vectors, this.embedder, this.policy, this.listMax);
   }
 }
 
@@ -49,6 +54,10 @@ export class ScopedGraph {
   static readonly MAX_QUERY_BYTES = 4096;
   static readonly MAX_GET_IDS = 1000;
   private static readonly RRF_K = 60;
+  /** The listing contract (G-282). A consumer refuses a version it does not know. */
+  static readonly CONTRACT_VERSION = 'g282.1' as const;
+  static readonly DEFAULT_LIST_LIMIT = 50;
+  static readonly DEFAULT_LIST_MAX = 200;
 
   constructor(
     private readonly memoryScope: Scope,
@@ -56,7 +65,90 @@ export class ScopedGraph {
     private readonly vectors: VectorStore | null,
     private readonly embedder: Embedder | null,
     private readonly policy: AcceptancePolicy,
+    private readonly listMax: number = ScopedGraph.DEFAULT_LIST_MAX,
   ) {}
+
+  /** Sources this scope can see, newest first, a page at a time (G-282). */
+  async listSources(cursor: string | null = null, limit: number | null = null): Promise<ListingPage<ListedSource>> {
+    const size = this.listLimit(limit);
+    let after: [string, string] | null = null;
+    if (cursor !== null) {
+      const key = this.readCursor(cursor, 'sources');
+      if (key.length !== 2 || typeof key[0] !== 'string' || typeof key[1] !== 'string') {
+        throw new InvalidArgumentError('Invalid cursor.');
+      }
+      after = [key[0], key[1]];
+    }
+    const rows = await this.store.listSources(this.memoryScope, after, size + 1);
+    const items = rows.slice(0, size);
+    const last = items.at(-1);
+
+    return {
+      contractVersion: ScopedGraph.CONTRACT_VERSION,
+      items,
+      nextCursor: rows.length > size && last !== undefined ? this.writeCursor('sources', [last.createdAt, last.sourceId]) : null,
+    };
+  }
+
+  /**
+   * Live chunks of one source, in source order, a page at a time (G-282). A source outside this scope yields an
+   * empty page, never an error that would confirm it exists.
+   */
+  async listChunks(sourceId: string, cursor: string | null = null, limit: number | null = null): Promise<ListingPage<ListedChunk>> {
+    const size = this.listLimit(limit);
+    let afterSeq: number | null = null;
+    if (cursor !== null) {
+      const key = this.readCursor(cursor, `chunks:${sourceId}`);
+      if (key.length !== 1 || typeof key[0] !== 'number' || !Number.isInteger(key[0]) || key[0] < 0) {
+        throw new InvalidArgumentError('Invalid cursor.');
+      }
+      afterSeq = key[0];
+    }
+    const rows = await this.store.listChunks(this.memoryScope, sourceId, afterSeq, size + 1);
+    const page = rows.slice(0, size);
+    const last = page.at(-1);
+
+    return {
+      contractVersion: ScopedGraph.CONTRACT_VERSION,
+      // seq is the store's paging key; the contract's order is `position`.
+      items: page.map(({ seq: _seq, ...chunk }) => chunk),
+      nextCursor: rows.length > size && last !== undefined ? this.writeCursor(`chunks:${sourceId}`, [last.seq]) : null,
+    };
+  }
+
+  private listLimit(limit: number | null): number {
+    const size = limit ?? Math.min(ScopedGraph.DEFAULT_LIST_LIMIT, this.listMax);
+    if (!Number.isInteger(size) || size < 1 || size > this.listMax) {
+      throw new InvalidArgumentError(`limit must be between 1 and ${this.listMax}.`);
+    }
+
+    return size;
+  }
+
+  /**
+   * Opaque, and bound to this scope and listing: a cursor from another scope or listing is refused. It needs no
+   * secret, because every listing query applies the scope predicate regardless of the cursor.
+   */
+  private writeCursor(listing: string, key: ReadonlyArray<string | number>): string {
+    return Buffer.from(JSON.stringify({ k: key, b: this.cursorBinding(listing) }), 'utf8').toString('base64url');
+  }
+
+  private readCursor(cursor: string, listing: string): unknown[] {
+    let data: unknown = null;
+    if (cursor.length <= 1024 && /^[A-Za-z0-9_-]*$/.test(cursor)) {
+      try { data = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { data = null; }
+    }
+    if (typeof data !== 'object' || data === null || !Array.isArray((data as { k?: unknown }).k)
+      || (data as { b?: unknown }).b !== this.cursorBinding(listing)) {
+      throw new InvalidArgumentError('Invalid cursor.');
+    }
+
+    return (data as { k: unknown[] }).k;
+  }
+
+  private cursorBinding(listing: string): string {
+    return digest('prism-graph/cursor@1', [...this.memoryScope.toRow().map((v) => v ?? ''), listing]).slice(0, 16);
+  }
 
   scope(): Scope {
     return this.memoryScope;

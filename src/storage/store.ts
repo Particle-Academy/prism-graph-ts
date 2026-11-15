@@ -30,6 +30,44 @@ interface PreparedFact {
  * Every write runs in driver.atomic(): all-or-nothing, including inside the
  * caller's own transaction.
  */
+/** A source in a listing (G-282, contract g282.1). */
+export interface ListedSource {
+  readonly sourceId: string;
+  readonly title: string;
+  readonly kind: string | null;
+  readonly createdAt: string;
+  readonly chunkCount: number;
+  readonly trust: string;
+}
+
+/** A chunk in a listing (G-282, contract g282.1). */
+export interface ListedChunk {
+  readonly chunkId: string;
+  readonly sourceId: string;
+  readonly text: string;
+  readonly position: number;
+  readonly provenance: {
+    readonly uri: string;
+    readonly sha256: string;
+    readonly byteStart: number;
+    readonly byteEnd: number;
+    readonly lineStart: number;
+    readonly lineEnd: number;
+    readonly headingPath: string[];
+    readonly recipe: string;
+    readonly trust: string;
+    readonly writer: string;
+    readonly recordedAt: string;
+  };
+}
+
+/** A page of a listing. A consumer refuses a contractVersion it does not know. */
+export interface ListingPage<T> {
+  readonly contractVersion: 'g282.1';
+  readonly items: T[];
+  readonly nextCursor: string | null;
+}
+
 export class GraphStore {
   constructor(
     private readonly db: SqlDriver,
@@ -109,6 +147,79 @@ export class GraphStore {
     }
 
     return wanted.map((id) => byId.get(id)).filter((c): c is Chunk => c !== undefined);
+  }
+
+  /**
+   * Sources visible from `reader`, newest first, with at least one live chunk (G-282, contract g282.1). Rows are in
+   * the agreed shape; the caller pages with `after` = [createdAt, sourceId] of the last item it returned.
+   */
+  async listSources(reader: Scope, after: readonly [string, string] | null, limit: number): Promise<ListedSource[]> {
+    const [visible, bindings] = this.visible('s', reader);
+    const live = `SELECT 1 FROM ${this.tables.chunks} c WHERE c.source_id = s.id AND c.retired_at IS NULL`;
+    const page = after === null ? '' : ' AND (s.recorded_at < ? OR (s.recorded_at = ? AND s.id < ?))';
+    const rows = await this.db.all(
+      `SELECT s.id, s.uri, s.metadata, s.trust, s.recorded_at,
+              (SELECT COUNT(*) FROM ${this.tables.chunks} c WHERE c.source_id = s.id AND c.retired_at IS NULL) AS chunk_count
+       FROM ${this.tables.sources} s
+       WHERE ${visible} AND EXISTS (${live})${page}
+       ORDER BY s.recorded_at DESC, s.id DESC
+       LIMIT ${Math.max(1, Math.min(1001, Math.trunc(limit)))}`,
+      after === null ? bindings : [...bindings, after[0], after[0], after[1]],
+    );
+
+    return rows.map((row) => {
+      let metadata: unknown;
+      try { metadata = JSON.parse(String(row['metadata'])); } catch { metadata = {}; }
+      const meta = typeof metadata === 'object' && metadata !== null ? (metadata as Record<string, unknown>) : {};
+      const title = typeof meta['title'] === 'string' && meta['title'] !== '' ? meta['title'] : String(row['uri']);
+      const kind = typeof meta['kind'] === 'string' && meta['kind'] !== '' ? meta['kind'] : null;
+
+      return {
+        sourceId: String(row['id']).trim(),
+        title,
+        kind,
+        createdAt: String(row['recorded_at']).trim(),
+        chunkCount: Number(row['chunk_count']),
+        trust: String(row['trust']),
+      };
+    });
+  }
+
+  /** Live chunks of one source visible from `reader`, in source order. A source outside the scope yields nothing. */
+  async listChunks(reader: Scope, sourceId: string, afterSeq: number | null, limit: number): Promise<Array<ListedChunk & { seq: number }>> {
+    const [visible, bindings] = this.visible('s', reader);
+    const rows = await this.db.all(
+      `SELECT * FROM (
+         SELECT c.seq, c.id, c.source_id, c.text, c.byte_start, c.byte_end, c.line_start, c.line_end,
+                c.heading_path, c.recipe, s.uri, s.sha256, s.trust, s.writer, s.recorded_at,
+                ROW_NUMBER() OVER (ORDER BY c.seq) AS position
+         FROM ${this.tables.chunks} c
+         JOIN ${this.tables.sources} s ON s.id = c.source_id
+         WHERE c.source_id = ? AND c.retired_at IS NULL AND ${visible}
+       ) listed WHERE listed.seq > ? ORDER BY listed.seq LIMIT ${Math.max(1, Math.min(1001, Math.trunc(limit)))}`,
+      [sourceId, ...bindings, afterSeq ?? 0],
+    );
+
+    return rows.map((row) => ({
+      chunkId: String(row['id']).trim(),
+      sourceId: String(row['source_id']).trim(),
+      text: String(row['text']),
+      position: Number(row['position']),
+      seq: Number(row['seq']),
+      provenance: {
+        uri: String(row['uri']),
+        sha256: String(row['sha256']).trim(),
+        byteStart: Number(row['byte_start']),
+        byteEnd: Number(row['byte_end']),
+        lineStart: Number(row['line_start']),
+        lineEnd: Number(row['line_end']),
+        headingPath: JSON.parse(String(row['heading_path'])) as string[],
+        recipe: String(row['recipe']),
+        trust: String(row['trust']),
+        writer: String(row['writer']),
+        recordedAt: String(row['recorded_at']).trim(),
+      },
+    }));
   }
 
   /** Full-text search over live chunks visible from `reader`, best first. */
