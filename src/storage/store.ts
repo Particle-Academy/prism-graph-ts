@@ -61,6 +61,21 @@ export interface ListedChunk {
   };
 }
 
+/**
+ * An OPTIONAL store capability (G-295): one source by id, in exactly the ListedSource shape listSources returns, or
+ * null when listSources for `reader` would not list it. ScopedGraph.getSource detects it at runtime, so a store
+ * without it keeps working for everything else.
+ */
+export interface FindsSources {
+  findSource(reader: Scope, sourceId: string): Promise<ListedSource | null>;
+}
+
+/** The result of ScopedGraph.getSource (G-295). `item` is null for any source this scope cannot list. */
+export interface SourceLookup {
+  readonly contractVersion: 'g282.1';
+  readonly item: ListedSource | null;
+}
+
 /** A page of a listing. A consumer refuses a contractVersion it does not know. */
 export interface ListingPage<T> {
   readonly contractVersion: 'g282.1';
@@ -68,7 +83,7 @@ export interface ListingPage<T> {
   readonly nextCursor: string | null;
 }
 
-export class GraphStore {
+export class GraphStore implements FindsSources {
   constructor(
     private readonly db: SqlDriver,
     private readonly tables: TableMap = new TableMap(),
@@ -154,17 +169,35 @@ export class GraphStore {
    * the agreed shape; the caller pages with `after` = [createdAt, sourceId] of the last item it returned.
    */
   async listSources(reader: Scope, after: readonly [string, string] | null, limit: number): Promise<ListedSource[]> {
+    const page = after === null ? '' : ' AND (s.recorded_at < ? OR (s.recorded_at = ? AND s.id < ?))';
+
+    return this.listedSources(
+      reader,
+      `${page}
+       ORDER BY s.recorded_at DESC, s.id DESC
+       LIMIT ${Math.max(1, Math.min(1001, Math.trunc(limit)))}`,
+      after === null ? [] : [after[0], after[0], after[1]],
+    );
+  }
+
+  /**
+   * One source by id (G-295), or null. Found iff it would appear in listSources for `reader`: the same visibility
+   * predicate and the same live-chunk condition, so absent, out-of-scope and fully retired read alike.
+   */
+  async findSource(reader: Scope, sourceId: string): Promise<ListedSource | null> {
+    return (await this.listedSources(reader, ' AND s.id = ? LIMIT 1', [sourceId]))[0] ?? null;
+  }
+
+  /** The listing query and its row mapping, shared by listSources and findSource. `tail` is a fixed SQL suffix. */
+  private async listedSources(reader: Scope, tail: string, tailBindings: readonly SqlValue[]): Promise<ListedSource[]> {
     const [visible, bindings] = this.visible('s', reader);
     const live = `SELECT 1 FROM ${this.tables.chunks} c WHERE c.source_id = s.id AND c.retired_at IS NULL`;
-    const page = after === null ? '' : ' AND (s.recorded_at < ? OR (s.recorded_at = ? AND s.id < ?))';
     const rows = await this.db.all(
       `SELECT s.id, s.uri, s.metadata, s.trust, s.recorded_at,
               (SELECT COUNT(*) FROM ${this.tables.chunks} c WHERE c.source_id = s.id AND c.retired_at IS NULL) AS chunk_count
        FROM ${this.tables.sources} s
-       WHERE ${visible} AND EXISTS (${live})${page}
-       ORDER BY s.recorded_at DESC, s.id DESC
-       LIMIT ${Math.max(1, Math.min(1001, Math.trunc(limit)))}`,
-      after === null ? bindings : [...bindings, after[0], after[0], after[1]],
+       WHERE ${visible} AND EXISTS (${live})${tail}`,
+      [...bindings, ...tailBindings],
     );
 
     return rows.map((row) => {
