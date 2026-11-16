@@ -76,6 +76,7 @@ For a memory explorer, list what a scope can see, a page at a time:
 const page = await memory.listSources();                // newest first, 50 per page
 const next = await memory.listSources(page.nextCursor);
 const chunks = await memory.listChunks(sourceId, null, 100);
+const { item } = await memory.getSource(chunk.sourceId); // one source by id, or null
 ```
 
 Each call returns `{ contractVersion: 'g282.1', items, nextCursor }`, the same shape as the PHP package.
@@ -88,6 +89,9 @@ Each call returns `{ contractVersion: 'g282.1', items, nextCursor }`, the same s
 - **Page size** defaults to 50 and is capped at 200. Pass a different cap as `new Graph(store, vectors, embedder,
   policy, listMax)`.
 - Retired sources and chunks are not listed.
+- `getSource(sourceId)` returns `{ contractVersion: 'g282.1', item }`: `item` is exactly what `listSources` would
+  list, or null whenever `listSources` would not list it. Unknown, another scope's and fully retired look the same.
+  It is an optional store capability (`FindsSources`); a store without it throws `GraphError`.
 
 ## MCP tools on your own server
 

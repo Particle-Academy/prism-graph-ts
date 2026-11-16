@@ -4,7 +4,7 @@ import { GraphError, InvalidArgumentError } from './errors.js';
 import type { EraseReport, Fact, IngestReport } from './fact.js';
 import { IndexSpec } from './index-spec.js';
 import type { Scope } from './scope.js';
-import type { GraphStore, ListedChunk, ListedSource, ListingPage } from './storage/store.js';
+import type { FindsSources, GraphStore, ListedChunk, ListedSource, ListingPage, SourceLookup } from './storage/store.js';
 import { DefaultAcceptancePolicy, type AcceptancePolicy, type Origin } from './trust.js';
 import type { Embedder, VectorStore } from './vectors.js';
 
@@ -58,6 +58,8 @@ export class ScopedGraph {
   static readonly CONTRACT_VERSION = 'g282.1' as const;
   static readonly DEFAULT_LIST_LIMIT = 50;
   static readonly DEFAULT_LIST_MAX = 200;
+  /** The largest source id getSource accepts, in UTF-8 bytes (G-295). */
+  static readonly MAX_SOURCE_ID_BYTES = 255;
 
   constructor(
     private readonly memoryScope: Scope,
@@ -88,6 +90,30 @@ export class ScopedGraph {
       items,
       nextCursor: rows.length > size && last !== undefined ? this.writeCursor('sources', [last.createdAt, last.sourceId]) : null,
     };
+  }
+
+  /**
+   * One source by id, in the listSources item shape (G-295). `item` is null when listSources would not list it from
+   * this scope: absent, another scope's, another tenant's and fully retired all read alike, never as an error that
+   * would confirm the source exists.
+   */
+  async getSource(sourceId: string): Promise<SourceLookup> {
+    if (typeof sourceId !== 'string' || sourceId === '' || Buffer.byteLength(sourceId, 'utf8') > ScopedGraph.MAX_SOURCE_ID_BYTES
+      || /\p{Cc}/u.test(sourceId)) {
+      throw new InvalidArgumentError(`A source id must be 1-${ScopedGraph.MAX_SOURCE_ID_BYTES} bytes with no control characters.`);
+    }
+
+    return { contractVersion: ScopedGraph.CONTRACT_VERSION, item: await this.finder().findSource(this.memoryScope, sourceId) };
+  }
+
+  /** Source lookup is an optional store capability, detected at runtime like the reference's ListsGraph. */
+  private finder(): FindsSources {
+    const store = this.store as GraphStore & Partial<FindsSources>;
+    if (typeof store.findSource !== 'function') {
+      throw new GraphError('This graph store does not support source lookup (implement FindsSources.findSource).');
+    }
+
+    return store as FindsSources;
   }
 
   /**
