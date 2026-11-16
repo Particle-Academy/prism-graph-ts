@@ -74,13 +74,14 @@ describe('getSource (G-295)', () => {
     const spy = vi.spyOn(w.store, 'findSource');
     const alice = w.graph().scope(aliceScope());
 
-    for (const id of [undefined, null, 42, {}, ['x'], '', 'a'.repeat(256), 'é'.repeat(128), 'a\u0000b', 'a\nb', 'a\u007Fb', 'a\u0085b']) {
+    for (const id of [undefined, null, 42, {}, ['x'], '', 'a'.repeat(65), 'é'.repeat(33), 'a\u0000b', 'a\nb', 'a\u007Fb', 'a\u0085b', 'a\uD800b', '\uDFFF', 'a\uDC00\uD800']) {
       await expect(alice.getSource(id as unknown as string)).rejects.toThrow(InvalidArgumentError);
     }
     expect(spy).not.toHaveBeenCalled();
-    // The bound is bytes, not characters: 255 bytes is accepted.
-    expect((await alice.getSource('a'.repeat(255))).item).toBeNull();
-    expect((await alice.getSource('é'.repeat(127))).item).toBeNull();
+    // The bound is bytes, not characters: 64 bytes is accepted, and ids are not restricted to hex.
+    expect((await alice.getSource('a'.repeat(64))).item).toBeNull();
+    expect((await alice.getSource('é'.repeat(32))).item).toBeNull();
+    expect((await alice.getSource('\u{1F600}'.repeat(16))).item).toBeNull();
   });
 
   it('refuses with a GraphError when the store lacks the capability, and listing still works', async () => {

@@ -58,8 +58,8 @@ export class ScopedGraph {
   static readonly CONTRACT_VERSION = 'g282.1' as const;
   static readonly DEFAULT_LIST_LIMIT = 50;
   static readonly DEFAULT_LIST_MAX = 200;
-  /** The largest source id getSource accepts, in UTF-8 bytes (G-295). */
-  static readonly MAX_SOURCE_ID_BYTES = 255;
+  /** The largest source id getSource accepts, in UTF-8 bytes (G-295): ids are 64-char digests, CHAR(64). */
+  static readonly MAX_SOURCE_ID_BYTES = 64;
 
   constructor(
     private readonly memoryScope: Scope,
@@ -99,8 +99,8 @@ export class ScopedGraph {
    */
   async getSource(sourceId: string): Promise<SourceLookup> {
     if (typeof sourceId !== 'string' || sourceId === '' || Buffer.byteLength(sourceId, 'utf8') > ScopedGraph.MAX_SOURCE_ID_BYTES
-      || /\p{Cc}/u.test(sourceId)) {
-      throw new InvalidArgumentError(`A source id must be 1-${ScopedGraph.MAX_SOURCE_ID_BYTES} bytes with no control characters.`);
+      || !sourceId.isWellFormed() || /\p{Cc}/u.test(sourceId)) {
+      throw new InvalidArgumentError(`A source id must be 1-${ScopedGraph.MAX_SOURCE_ID_BYTES} bytes of valid UTF-8 with no control characters.`);
     }
 
     return { contractVersion: ScopedGraph.CONTRACT_VERSION, item: await this.finder().findSource(this.memoryScope, sourceId) };
