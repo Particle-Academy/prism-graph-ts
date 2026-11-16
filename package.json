@@ -1,6 +1,6 @@
 {
   "name": "@particle-academy/prism-graph",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Long-term memory for AI agents, for TypeScript: scoped, trust-labelled, cited facts, hybrid search and erasure. The port of particle-academy/prism-graph.",
   "type": "module",
   "sideEffects": false,
